@@ -236,7 +236,43 @@ app.action<ApplyToJobInput, ApplyToJobOutput>(
       }
 
       // 5. Detect open-ended questions
-      // TODO: Extract open-ended questions from the form
+      // Extract all visible textarea elements and their associated labels
+      const openEndedQuestions: { label: string; locator: import('playwright').Locator }[] = [];
+      const textareas = page.locator('textarea');
+      const count = await textareas.count();
+      for (let i = 0; i < count; i++) {
+        const textarea = textareas.nth(i);
+        // Check if visible
+        if (await textarea.isVisible()) {
+          // Try to find associated label
+          let labelText = '';
+          // 1. Check for <label for=...>
+          const id = await textarea.getAttribute('id');
+          if (id) {
+            const label = page.locator(`label[for="${id}"]`);
+            if (await label.count()) {
+              labelText = (await label.first().textContent())?.trim() || '';
+            }
+          }
+          // 2. Check if textarea is wrapped by a label
+          if (!labelText) {
+            const parentLabel = await textarea.locator('xpath=ancestor::label').first();
+            if (await parentLabel.count()) {
+              labelText = (await parentLabel.textContent())?.trim() || '';
+            }
+          }
+          // 3. Fallback: look for preceding text node or element
+          if (!labelText) {
+            const prev = textarea.locator('xpath=preceding-sibling::*[1]');
+            if (await prev.count()) {
+              labelText = (await prev.textContent())?.trim() || '';
+            }
+          }
+          openEndedQuestions.push({ label: labelText, locator: textarea });
+        }
+      }
+      // Optionally: log detected questions
+      console.log('Detected open-ended questions:', openEndedQuestions.map(q => q.label));
 
       // 6. Use OpenAI GPT-4o to generate responses
       // TODO: Call OpenAI API for each open-ended question
