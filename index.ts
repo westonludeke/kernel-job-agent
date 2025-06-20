@@ -197,7 +197,43 @@ app.action<ApplyToJobInput, ApplyToJobOutput>(
       }
 
       // 4. Upload resume PDF
-      // TODO: Implement resume upload logic
+      // Try to find file input by label (e.g., Resume, CV), then fallback to any file input
+      const fileLabels = [/resume/i, /cv/i];
+      let fileInputFound = false;
+      const labelElements = await page.locator('label').all();
+      for (const labelEl of labelElements) {
+        const text = (await labelEl.textContent()) || '';
+        if (fileLabels.some((re) => re.test(text))) {
+          const forAttr = await labelEl.getAttribute('for');
+          if (forAttr) {
+            const input = page.locator(`#${forAttr}[type="file"]`);
+            if (await input.count()) {
+              await input.setInputFiles(payload.resumePath);
+              fileInputFound = true;
+              break;
+            }
+          } else {
+            // Label wraps input
+            const input = labelEl.locator('input[type="file"]');
+            if (await input.count()) {
+              await input.setInputFiles(payload.resumePath);
+              fileInputFound = true;
+              break;
+            }
+          }
+        }
+      }
+      if (!fileInputFound) {
+        // Fallback: try any file input
+        const fileInputs = page.locator('input[type="file"]');
+        if (await fileInputs.count()) {
+          await fileInputs.first().setInputFiles(payload.resumePath);
+          fileInputFound = true;
+        }
+      }
+      if (!fileInputFound) {
+        console.warn('Could not find file input for resume upload');
+      }
 
       // 5. Detect open-ended questions
       // TODO: Extract open-ended questions from the form
