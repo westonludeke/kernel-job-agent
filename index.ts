@@ -99,3 +99,128 @@ app.action("create-persisted-browser",
     };
   }
 );
+
+/**
+ * Main agent logic: Automate job applications on Ashby-style pages
+ * Args:
+ *     ctx: Kernel context containing invocation information
+ *     payload: Job application details (URL, applicant info, etc.)
+ * Returns:
+ *     A dictionary with the application result and any errors
+ */
+interface ApplyToJobInput {
+  url: string;
+  name: string;
+  email: string;
+  linkedin: string;
+  resumePath: string; // Path to the resume PDF in the workspace
+  // Add more fields as needed
+}
+
+interface ApplyToJobOutput {
+  success: boolean;
+  message: string;
+  errors?: string[];
+}
+
+app.action<ApplyToJobInput, ApplyToJobOutput>(
+  'apply-to-job',
+  async (ctx: KernelContext, payload?: ApplyToJobInput): Promise<ApplyToJobOutput> => {
+    if (!payload?.url) {
+      return { success: false, message: 'Job application URL is required', errors: ['Missing URL'] };
+    }
+    // TODO: Validate other required fields (name, email, etc.)
+
+    let browser;
+    try {
+      // 1. Launch Kernel browser
+      const kernelBrowser = await kernel.browsers.create({
+        invocation_id: ctx.invocation_id,
+      });
+      browser = await chromium.connectOverCDP(kernelBrowser.cdp_ws_url);
+      const context = await browser.contexts()[0] || (await browser.newContext());
+      const page = await context.pages()[0] || (await context.newPage());
+
+      // 2. Navigate to the job application URL
+      await page.goto(payload.url);
+
+      // 3. Fill out standard fields (name, email, LinkedIn, etc.)
+      // Try to fill by label, then by placeholder, for each field
+      const fieldConfigs = [
+        { label: /name|full name/i, value: payload.name },
+        { label: /email/i, value: payload.email },
+        { label: /linkedin/i, value: payload.linkedin },
+      ];
+      for (const { label, value } of fieldConfigs) {
+        let filled = false;
+        // Try by label
+        const labelElements = await page.locator(`label`).all();
+        for (const labelEl of labelElements) {
+          const text = (await labelEl.textContent()) || '';
+          if (label.test(text)) {
+            const forAttr = await labelEl.getAttribute('for');
+            if (forAttr) {
+              const input = page.locator(`#${forAttr}`);
+              if (await input.count()) {
+                await input.fill(value);
+                filled = true;
+                break;
+              }
+            } else {
+              // Label wraps input
+              const input = labelEl.locator('input,textarea');
+              if (await input.count()) {
+                await input.fill(value);
+                filled = true;
+                break;
+              }
+            }
+          }
+        }
+        if (!filled) {
+          // Try by placeholder
+          const input = page.locator(`input[placeholder],textarea[placeholder]`);
+          const count = await input.count();
+          for (let i = 0; i < count; i++) {
+            const el = input.nth(i);
+            const placeholder = (await el.getAttribute('placeholder')) || '';
+            if (label.test(placeholder)) {
+              await el.fill(value);
+              filled = true;
+              break;
+            }
+          }
+        }
+        if (!filled) {
+          console.warn(`Could not find field for label: ${label}`);
+        }
+      }
+
+      // 4. Upload resume PDF
+      // TODO: Implement resume upload logic
+
+      // 5. Detect open-ended questions
+      // TODO: Extract open-ended questions from the form
+
+      // 6. Use OpenAI GPT-4o to generate responses
+      // TODO: Call OpenAI API for each open-ended question
+
+      // 7. Insert AI-generated answers into the form
+      // TODO: Fill in generated answers
+
+      // 8. Submit the application
+      // TODO: Implement form submission
+
+      // 9. Handle errors (captchas, timeouts, missing fields)
+      // TODO: Add error handling logic
+
+      return { success: true, message: 'Application submitted (scaffold only)' };
+    } catch (err: any) {
+      return { success: false, message: 'Failed to apply to job', errors: [err?.message || String(err)] };
+    } finally {
+      if (browser) {
+        await browser.close();
+      }
+    }
+  },
+);
