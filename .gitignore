@@ -36,4 +36,7 @@ coverage/
 # Misc
 .cache/
 .temp/
-.tmp/ 
+.tmp/
+
+# Personal
+Weston_Ludeke_Resume.pdf
