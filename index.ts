@@ -304,6 +304,7 @@ app.action<ApplyToJobInput, ApplyToJobOutput>(
           try {
             const prompt = `You are a world-class job applicant applying for a role.
             Based on the following job description, please provide a concise and professional answer to the application question.
+            Your response must be plain text only, with no markdown formatting (like bolding or lists) and no em-dashes (—).
 
             Job Description:
             ---
