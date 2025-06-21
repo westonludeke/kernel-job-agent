@@ -132,6 +132,7 @@ app.action<ApplyToJobInput, ApplyToJobOutput>(
     }
 
     let browser;
+    const consoleErrors: string[] = []; // Declare here to be accessible in finally
     try {
       // 1. Launch Kernel browser
       const kernelBrowser = await kernel.browsers.create({
@@ -140,6 +141,14 @@ app.action<ApplyToJobInput, ApplyToJobOutput>(
       browser = await chromium.connectOverCDP(kernelBrowser.cdp_ws_url);
       const context = await browser.contexts()[0] || (await browser.newContext());
       const page = await context.pages()[0] || (await context.newPage());
+
+      // Capture console errors for debugging
+      page.on('console', (msg) => {
+        if (msg.type() === 'error') {
+          console.error(`Browser Console Error: ${msg.text()}`);
+          consoleErrors.push(msg.text());
+        }
+      });
 
       // Normalize URL to get base and application URLs
       const baseUrl = payload.url.replace(/\/application\/?$/, '');
@@ -375,7 +384,8 @@ app.action<ApplyToJobInput, ApplyToJobOutput>(
         return { success: false, message: 'Could not find submit button.', errors: ['Submit button not found on page.'] };
       }
     } catch (err: any) {
-      return { success: false, message: 'An unexpected error occurred during the process.', errors: [err?.message || String(err)] };
+      const allErrors = [err?.message || String(err), ...consoleErrors];
+      return { success: false, message: 'An unexpected error occurred during the process.', errors: allErrors };
     } finally {
       if (browser) {
         await browser.close();
