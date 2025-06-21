@@ -338,14 +338,44 @@ app.action<ApplyToJobInput, ApplyToJobOutput>(
       }
 
       // 8. Submit the application
-      // TODO: Implement form submission
+      const submitButton = page.locator('button[type="submit"]:has-text(/submit/i)');
+      if (await submitButton.count() > 0) {
+        console.log('Submitting the application...');
+        await submitButton.first().click();
 
-      // 9. Handle errors (captchas, timeouts, missing fields)
-      // TODO: Add error handling logic
+        // 9. Handle post-submission state (success or errors)
+        // Wait for navigation to a success page or for an error message to appear
+        try {
+          // Option 1: Wait for a URL change that indicates success (common on Ashby)
+          await page.waitForURL('**/application/submitted', { timeout: 10000 });
+          console.log('Application submitted successfully! Navigated to success page.');
+          return { success: true, message: 'Application submitted successfully.' };
+        } catch (e) {
+          // Option 2: Check for inline validation errors if navigation doesn't happen
+          const validationError = page.locator('.ashby-application-form-errors__error-message, [role="alert"]');
+          if (await validationError.count() > 0) {
+            const errorMessages = await validationError.allInnerTexts();
+            console.error('Submission failed with validation errors:', errorMessages);
+            return { success: false, message: 'Submission failed with validation errors.', errors: errorMessages };
+          }
 
-      return { success: true, message: 'Application submitted (scaffold only)' };
+          // Option 3: Check for a generic success message on the same page
+          const successMessage = page.locator('text=/Thank you for your application|Application submitted/i');
+          if (await successMessage.count() > 0) {
+            console.log('Application submitted successfully! Found success message.');
+            return { success: true, message: 'Application submitted successfully.' };
+          }
+
+          // If none of the above, assume it might have worked but we can't confirm.
+          console.log('Submit button clicked, but confirmation state is unclear. Assuming success.');
+          return { success: true, message: 'Application submitted, but confirmation could not be verified.' };
+        }
+      } else {
+        console.error('Could not find the submit button.');
+        return { success: false, message: 'Could not find submit button.', errors: ['Submit button not found on page.'] };
+      }
     } catch (err: any) {
-      return { success: false, message: 'Failed to apply to job', errors: [err?.message || String(err)] };
+      return { success: false, message: 'An unexpected error occurred during the process.', errors: [err?.message || String(err)] };
     } finally {
       if (browser) {
         await browser.close();
