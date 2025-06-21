@@ -141,8 +141,15 @@ app.action<ApplyToJobInput, ApplyToJobOutput>(
       const context = await browser.contexts()[0] || (await browser.newContext());
       const page = await context.pages()[0] || (await context.newPage());
 
+      // Normalize the job application URL to always end with /application
+      function getApplicationUrl(url: string): string {
+        if (url.endsWith('/application')) return url;
+        return url.replace(/\/$/, '') + '/application';
+      }
+      const applicationUrl = getApplicationUrl(payload.url);
+
       // 2. Navigate to the job application URL
-      await page.goto(payload.url);
+      await page.goto(applicationUrl);
 
       // 3. Fill out standard fields (name, email, LinkedIn, etc.)
       // Try to fill by label, then by placeholder, for each field
