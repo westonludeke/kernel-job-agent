@@ -1,5 +1,6 @@
 import { Kernel, type KernelContext } from '@onkernel/sdk';
-import { chromium } from 'playwright';
+import { chromium, type Locator } from 'playwright';
+import OpenAI from 'openai';
 
 const kernel = new Kernel();
 
@@ -126,10 +127,9 @@ interface ApplyToJobOutput {
 app.action<ApplyToJobInput, ApplyToJobOutput>(
   'apply-to-job',
   async (ctx: KernelContext, payload?: ApplyToJobInput): Promise<ApplyToJobOutput> => {
-    if (!payload?.url) {
-      return { success: false, message: 'Job application URL is required', errors: ['Missing URL'] };
+    if (!payload?.url || !payload.name || !payload.email || !payload.linkedin || !payload.resumePath) {
+      return { success: false, message: 'Missing required fields', errors: ['URL, name, email, linkedin, and resumePath are required'] };
     }
-    // TODO: Validate other required fields (name, email, etc.)
 
     let browser;
     try {
@@ -141,12 +141,25 @@ app.action<ApplyToJobInput, ApplyToJobOutput>(
       const context = await browser.contexts()[0] || (await browser.newContext());
       const page = await context.pages()[0] || (await context.newPage());
 
-      // Normalize the job application URL to always end with /application
-      function getApplicationUrl(url: string): string {
-        if (url.endsWith('/application')) return url;
-        return url.replace(/\/$/, '') + '/application';
+      // Normalize URL to get base and application URLs
+      const baseUrl = payload.url.replace(/\/application\/?$/, '');
+      const applicationUrl = `${baseUrl}/application`;
+
+      // 1.5 Scrape job description for context
+      let jobDescription = '';
+      try {
+        await page.goto(baseUrl);
+        // This selector is specific to Ashby job pages
+        const descriptionElement = page.locator('[data-ashby-body="true"]');
+        if (await descriptionElement.count()) {
+          jobDescription = await descriptionElement.innerText();
+          console.log('Scraped job description for context.');
+        } else {
+          console.warn('Could not find job description element on the page.');
+        }
+      } catch (e: any) {
+        console.warn(`Could not scrape job description, proceeding without it. Error: ${e.message}`);
       }
-      const applicationUrl = getApplicationUrl(payload.url);
 
       // 2. Navigate to the job application URL
       await page.goto(applicationUrl);
@@ -244,7 +257,7 @@ app.action<ApplyToJobInput, ApplyToJobOutput>(
 
       // 5. Detect open-ended questions
       // Extract all visible textarea elements and their associated labels
-      const openEndedQuestions: { label: string; locator: import('playwright').Locator }[] = [];
+      const openEndedQuestions: { label: string; locator: Locator }[] = [];
       const textareas = page.locator('textarea');
       const count = await textareas.count();
       for (let i = 0; i < count; i++) {
@@ -282,10 +295,46 @@ app.action<ApplyToJobInput, ApplyToJobOutput>(
       console.log('Detected open-ended questions:', openEndedQuestions.map(q => q.label));
 
       // 6. Use OpenAI GPT-4o to generate responses
-      // TODO: Call OpenAI API for each open-ended question
+      if (openEndedQuestions.length > 0) {
+        // Initialize OpenAI client
+        const openai = new OpenAI(); // Automatically uses OPENAI_API_KEY from env
 
-      // 7. Insert AI-generated answers into the form
-      // TODO: Fill in generated answers
+        for (const question of openEndedQuestions) {
+          console.log(`Generating answer for: "${question.label}"`);
+          try {
+            const prompt = `You are a world-class job applicant applying for a role.
+            Based on the following job description, please provide a concise and professional answer to the application question.
+
+            Job Description:
+            ---
+            ${jobDescription || 'Not available'}
+            ---
+
+            Question: "${question.label}"
+
+            Answer:`;
+
+            const completion = await openai.chat.completions.create({
+              model: 'gpt-4o',
+              messages: [{ role: 'user', content: prompt }],
+              temperature: 0.7,
+              max_tokens: 250,
+            });
+
+            const answer = completion.choices[0]?.message?.content?.trim();
+
+            if (answer) {
+              // 7. Insert AI-generated answers into the form
+              await question.locator.fill(answer);
+              console.log(`Filled answer for: "${question.label}"`);
+            } else {
+              console.warn(`Generated empty answer for: "${question.label}"`);
+            }
+          } catch (err: any) {
+            console.error(`Failed to generate answer for "${question.label}":`, err.message);
+          }
+        }
+      }
 
       // 8. Submit the application
       // TODO: Implement form submission
