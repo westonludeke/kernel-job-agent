@@ -466,8 +466,10 @@ app.action<ApplyToJobInput, ApplyToJobOutput>(
       // 8. Submit the application
       const submitButton = page.getByRole('button', { name: /Submit Application/i });
       if (await submitButton.count() > 0) {
+        console.log('Pausing for 10 seconds before submitting. Open the Live View URL now!');
+        await page.waitForTimeout(10000); // 10 seconds
         console.log('Submitting the application...');
-        // await submitButton.first().click();
+        await submitButton.first().click();
 
         // 9. Handle post-submission state (success or errors)
         // Wait for navigation to a success page or for an error message to appear
