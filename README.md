@@ -1,6 +1,6 @@
-# AI Job Application Agent
+# Kernel AI Job Application Agent
 
-A sophisticated AI agent that automates the job application process on Ashby-hosted pages, using GPT-4o to write tailored, human-like responses.
+An AI-powered job application agent that automates the entire submission process on Ashby-hosted forms, including writing high-quality answers with GPT-4o.
 
 This project is a demonstration of how modern AI and browser automation tools can be combined to handle complex, real-world tasks. It is designed to be both a practical tool and an impressive portfolio piece.
 
@@ -14,13 +14,11 @@ For hiring managers, recruiters, and anyone curious about the agent's capabiliti
 4.  **Writes Unique, Tailored Answers:** For open-ended questions (like "Why do you want to work here?"), the agent uses OpenAI's GPT-4o and the context from the job description to write a professional, relevant, and natural-sounding answer. It's specifically instructed to avoid robotic language and formatting. **The agent now logs the exact AI-generated answer for each question, so you can monitor what is being submitted.**
 5.  **Submits and Confirms:** The agent clicks the final submit button and then checks to make sure the application was received successfully.
 6.  **Handles Errors Gracefully:** If something goes wrong—like a missing field or a website glitch—the agent detects it, reports the problem, and stops, preventing failed or incomplete submissions.
-7.  **Live View Debugging (Optional):** Kernel provides a live browser view (noVNC) so you can watch the automation in real time. This is optional and not required for successful automation.
+7.  **Optional Live Debugging:** You can watch the entire process in real time through a browser window, thanks to Kernel’s built-in live view. Useful for debugging or just seeing the magic happen..
 
 ---
 
-## Technical Deep Dive
-
-For software engineers and technical evaluators, here's a look under the hood:
+## 🧠 How It Works (Technical)
 
 -   **URL Normalization:** The agent accepts either a base job URL or a direct application URL. It programmatically normalizes the URL to first scrape the job description from the base path (e.g., `.../job-id/`) and then navigates to the form at the `/application` path.
 -   **Context Scraping:** It uses a Playwright locator (tries several selectors, falls back to full page text) to extract the job description. This context is crucial for the quality of the AI-generated responses.
@@ -44,7 +42,9 @@ For software engineers and technical evaluators, here's a look under the hood:
 -   **AI & Language Model:** [OpenAI GPT-4o](https://platform.openai.com/docs) – For generating contextual, high-quality answers.
 -   **Language & Runtime:** [TypeScript](https://www.typescriptlang.org/) & [Node.js](https://nodejs.org/) – For building robust, type-safe agent logic.
 
-## 🚀 Getting Started
+Want to run this yourself? Here’s how to deploy and test it with your own resume:
+
+## ⚙️ Setup & Usage
 
 1.  Clone the repo:  
     `git clone <your-repo-url>`
@@ -55,7 +55,8 @@ For software engineers and technical evaluators, here's a look under the hood:
 4.  Add your resume (e.g., `My_Resume.pdf`) to the root directory, or upload it to a public URL (e.g., GitHub raw, Dropbox, S3).
 5.  Deploy to Kernel using the CLI:  
     `source .env && kernel deploy index.ts --env OPENAI_API_KEY=$OPENAI_API_KEY`
-6.  Invoke the agent with the target job URL and your personal details.
+6.  You can view all logs (including AI answers and errors) via `kernel logs ts-basic -f`.
+7.  In a separate terminal window, invoke the agent with the target job URL and your personal details:
 
     ```bash
     kernel invoke ts-basic apply-to-job --payload '{
