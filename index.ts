@@ -451,6 +451,7 @@ app.action<ApplyToJobInput, ApplyToJobOutput>(
 
             if (answer) {
               // 7. Insert AI-generated answers into the form
+              console.log(`AI-generated answer for "${question.label}": ${answer}`);
               await question.locator.fill(answer);
               console.log(`Filled answer for: "${question.label}"`);
             } else {
