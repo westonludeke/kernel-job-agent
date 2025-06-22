@@ -1,6 +1,8 @@
 import { Kernel, type KernelContext } from '@onkernel/sdk';
 import { chromium, type Locator } from 'playwright';
 import OpenAI from 'openai';
+import fetch from 'node-fetch';
+import { writeFileSync } from 'fs';
 
 const kernel = new Kernel();
 
@@ -114,7 +116,8 @@ interface ApplyToJobInput {
   name: string;
   email: string;
   linkedin: string;
-  resumePath: string; // Path to the resume PDF in the workspace
+  resumePath?: string; // Path to the resume PDF in the workspace (optional)
+  resumeUrl?: string;  // Public URL to download the resume (optional)
   // Add more fields as needed
 }
 
@@ -127,8 +130,9 @@ interface ApplyToJobOutput {
 app.action<ApplyToJobInput, ApplyToJobOutput>(
   'apply-to-job',
   async (ctx: KernelContext, payload?: ApplyToJobInput): Promise<ApplyToJobOutput> => {
-    if (!payload?.url || !payload.name || !payload.email || !payload.linkedin || !payload.resumePath) {
-      return { success: false, message: 'Missing required fields', errors: ['URL, name, email, linkedin, and resumePath are required'] };
+    console.log(`\n\n--- NEW JOB APPLICATION [${new Date().toISOString()}] ---`);
+    if (!payload?.url || !payload.name || !payload.email || !payload.linkedin) {
+      return { success: false, message: 'Missing required fields', errors: ['URL, name, email, and linkedin are required'] };
     }
 
     let browser;
@@ -138,6 +142,7 @@ app.action<ApplyToJobInput, ApplyToJobOutput>(
       const kernelBrowser = await kernel.browsers.create({
         invocation_id: ctx.invocation_id,
       });
+      console.log(`Kernel Browser Live View URL: ${kernelBrowser.browser_live_view_url}`);
       browser = await chromium.connectOverCDP(kernelBrowser.cdp_ws_url);
       const context = await browser.contexts()[0] || (await browser.newContext());
       const page = await context.pages()[0] || (await context.newPage());
@@ -158,29 +163,95 @@ app.action<ApplyToJobInput, ApplyToJobOutput>(
       let jobDescription = '';
       try {
         await page.goto(baseUrl);
-        // This selector is specific to Ashby job pages
-        const descriptionElement = page.locator('[data-ashby-body="true"]');
-        if (await descriptionElement.count()) {
-          jobDescription = await descriptionElement.innerText();
-          console.log('Scraped job description for context.');
-        } else {
-          console.warn('Could not find job description element on the page.');
+        // Try multiple selectors to find the job description content
+        const selectors = [
+          '[data-ashby-body="true"]',
+          'main',
+          '.ashby-job-description',
+          '.job-description',
+          '[role="main"]',
+          'article'
+        ];
+        
+        for (const selector of selectors) {
+          const element = page.locator(selector);
+          if (await element.count() > 0) {
+            jobDescription = await element.innerText();
+            console.log(`Scraped job description using selector: ${selector}`);
+            break;
+          }
+        }
+        
+        if (!jobDescription) {
+          // Fallback: get all text content from the main page
+          jobDescription = await page.locator('body').innerText();
+          console.log('Used fallback method to scrape job description (full page content).');
         }
       } catch (e: any) {
         console.warn(`Could not scrape job description, proceeding without it. Error: ${e.message}`);
       }
 
       // 2. Navigate to the job application URL
+      console.log(`Navigating to application URL: ${applicationUrl}`);
       await page.goto(applicationUrl);
+      console.log(`Final URL after navigation: ${page.url()}`);
+      console.log(`Page title: ${await page.title()}`);
+      
+      // Wait for page to be fully loaded
+      await page.waitForLoadState('networkidle');
+      console.log('Page load state: networkidle');
+
+      // Debug: Log all form elements to understand the page structure
+      console.log('=== DEBUGGING FORM STRUCTURE ===');
+      const allInputs = await page.locator('input, textarea, select').all();
+      console.log(`Found ${allInputs.length} form elements:`);
+      for (let i = 0; i < allInputs.length; i++) {
+        const el = allInputs[i];
+        if (el) {
+          const tagName = await el.evaluate(el => el.tagName.toLowerCase());
+          const type = await el.getAttribute('type') || 'N/A';
+          const id = await el.getAttribute('id') || 'N/A';
+          const name = await el.getAttribute('name') || 'N/A';
+          const placeholder = await el.getAttribute('placeholder') || 'N/A';
+          console.log(`  ${i + 1}. <${tagName}> type="${type}" id="${id}" name="${name}" placeholder="${placeholder}"`);
+        }
+      }
+
+      const allLabels = await page.locator('label').all();
+      console.log(`Found ${allLabels.length} labels:`);
+      for (let i = 0; i < allLabels.length; i++) {
+        const el = allLabels[i];
+        if (el) {
+          const text = await el.textContent() || 'N/A';
+          const forAttr = await el.getAttribute('for') || 'N/A';
+          console.log(`  ${i + 1}. "${text}" (for="${forAttr}")`);
+        }
+      }
+      console.log('=== END DEBUGGING ===');
+
+      // Debug: Show all buttons to find the submit button
+      console.log('=== DEBUGGING BUTTONS ===');
+      const allButtons = await page.locator('button').all();
+      console.log(`Found ${allButtons.length} buttons:`);
+      for (let i = 0; i < allButtons.length; i++) {
+        const button = allButtons[i];
+        if (button) {
+          const text = await button.textContent() || 'N/A';
+          const type = await button.getAttribute('type') || 'N/A';
+          const className = await button.getAttribute('class') || 'N/A';
+          console.log(`  ${i + 1}. "${text}" (type="${type}", class="${className}")`);
+        }
+      }
+      console.log('=== END BUTTON DEBUGGING ===');
 
       // 3. Fill out standard fields (name, email, LinkedIn, etc.)
       // Try to fill by label, then by placeholder, for each field
       const fieldConfigs = [
         { label: /name|full name/i, value: payload.name },
         { label: /email/i, value: payload.email },
-        { label: /linkedin/i, value: payload.linkedin },
+        { label: /linkedin/i, value: payload.linkedin, optional: true }, // LinkedIn is optional
       ];
-      for (const { label, value } of fieldConfigs) {
+      for (const { label, value, optional = false } of fieldConfigs) {
         let filled = false;
         // Try by label
         const labelElements = await page.locator(`label`).all();
@@ -193,6 +264,7 @@ app.action<ApplyToJobInput, ApplyToJobOutput>(
               if (await input.count()) {
                 await input.fill(value);
                 filled = true;
+                console.log(`Filled ${text} field with value: ${value}`);
                 break;
               }
             } else {
@@ -201,6 +273,7 @@ app.action<ApplyToJobInput, ApplyToJobOutput>(
               if (await input.count()) {
                 await input.fill(value);
                 filled = true;
+                console.log(`Filled ${text} field with value: ${value}`);
                 break;
               }
             }
@@ -216,53 +289,96 @@ app.action<ApplyToJobInput, ApplyToJobOutput>(
             if (label.test(placeholder)) {
               await el.fill(value);
               filled = true;
+              console.log(`Filled field with placeholder "${placeholder}" with value: ${value}`);
               break;
             }
           }
         }
         if (!filled) {
-          console.warn(`Could not find field for label: ${label}`);
+          if (optional) {
+            console.log(`Optional field not found for label: ${label}`);
+          } else {
+            console.warn(`Could not find field for label: ${label}`);
+          }
         }
       }
 
       // 4. Upload resume PDF
-      // Try to find file input by label (e.g., Resume, CV), then fallback to any file input
-      const fileLabels = [/resume/i, /cv/i];
-      let fileInputFound = false;
-      const labelElements = await page.locator('label').all();
-      for (const labelEl of labelElements) {
-        const text = (await labelEl.textContent()) || '';
-        if (fileLabels.some((re) => re.test(text))) {
-          const forAttr = await labelEl.getAttribute('for');
-          if (forAttr) {
-            const input = page.locator(`#${forAttr}[type="file"]`);
-            if (await input.count()) {
-              await input.setInputFiles(payload.resumePath);
-              fileInputFound = true;
-              break;
-            }
-          } else {
-            // Label wraps input
-            const input = labelEl.locator('input[type="file"]');
-            if (await input.count()) {
-              await input.setInputFiles(payload.resumePath);
-              fileInputFound = true;
-              break;
+      // Support downloading resume from a public URL
+      let resumeFilePath = payload.resumePath;
+      if (payload.resumeUrl) {
+        try {
+          const response = await fetch(payload.resumeUrl);
+          if (!response.ok) throw new Error(`Failed to download resume: ${response.statusText}`);
+          const buffer = await response.buffer();
+          resumeFilePath = '/tmp/resume.pdf';
+          writeFileSync(resumeFilePath, buffer);
+          console.log(`Downloaded resume from ${payload.resumeUrl} to ${resumeFilePath}`);
+        } catch (err: any) {
+          console.error(`Error downloading resume: ${err.message}`);
+        }
+      }
+      console.log('=== RESUME UPLOAD DEBUGGING ===');
+      console.log(`Attempting to upload resume from path: ${resumeFilePath}`);
+      if (!resumeFilePath) {
+        console.warn('No resume file path provided. Skipping resume upload.');
+      } else {
+        // Try to find file input by label (e.g., Resume, CV), then fallback to any file input
+        const fileLabels = [/resume/i, /cv/i];
+        let fileInputFound = false;
+        const labelElements = await page.locator('label').all();
+        for (const labelEl of labelElements) {
+          const text = (await labelEl.textContent()) || '';
+          if (fileLabels.some((re) => re.test(text))) {
+            const forAttr = await labelEl.getAttribute('for');
+            if (forAttr) {
+              const input = page.locator(`#${forAttr}[type="file"]`);
+              if (await input.count()) {
+                try {
+                  await input.setInputFiles(resumeFilePath);
+                  fileInputFound = true;
+                  console.log(`Uploaded resume to field: ${text}`);
+                  break;
+                } catch (err: any) {
+                  console.error(`Failed to upload resume: ${err.message}`);
+                  // Continue trying other methods
+                }
+              }
+            } else {
+              // Label wraps input
+              const input = labelEl.locator('input[type="file"]');
+              if (await input.count()) {
+                try {
+                  await input.setInputFiles(resumeFilePath);
+                  fileInputFound = true;
+                  console.log(`Uploaded resume to field: ${text}`);
+                  break;
+                } catch (err: any) {
+                  console.error(`Failed to upload resume: ${err.message}`);
+                  // Continue trying other methods
+                }
+              }
             }
           }
         }
-      }
-      if (!fileInputFound) {
-        // Fallback: try any file input
-        const fileInputs = page.locator('input[type="file"]');
-        if (await fileInputs.count()) {
-          await fileInputs.first().setInputFiles(payload.resumePath);
-          fileInputFound = true;
+        if (!fileInputFound) {
+          // Fallback: try any file input
+          const fileInputs = page.locator('input[type="file"]');
+          if (await fileInputs.count()) {
+            try {
+              await fileInputs.first().setInputFiles(resumeFilePath);
+              fileInputFound = true;
+              console.log('Uploaded resume using fallback method');
+            } catch (err: any) {
+              console.error(`Failed to upload resume via fallback: ${err.message}`);
+            }
+          }
+        }
+        if (!fileInputFound) {
+          console.warn('Could not find file input for resume upload');
         }
       }
-      if (!fileInputFound) {
-        console.warn('Could not find file input for resume upload');
-      }
+      console.log('=== END RESUME UPLOAD DEBUGGING ===');
 
       // 5. Detect open-ended questions
       // Extract all visible textarea elements and their associated labels
@@ -347,10 +463,10 @@ app.action<ApplyToJobInput, ApplyToJobOutput>(
       }
 
       // 8. Submit the application
-      const submitButton = page.locator('button[type="submit"]:has-text(/submit/i)');
+      const submitButton = page.getByRole('button', { name: /Submit Application/i });
       if (await submitButton.count() > 0) {
         console.log('Submitting the application...');
-        await submitButton.first().click();
+        // await submitButton.first().click();
 
         // 9. Handle post-submission state (success or errors)
         // Wait for navigation to a success page or for an error message to appear
