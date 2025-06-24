@@ -40,3 +40,13 @@ coverage/
 
 # Personal
 # Weston_Ludeke_Resume.pdf
+config/
+constants/
+docs/
+handlers/
+services/
+types/
+utils/
+
+# Documentation (Private/Sensitive)
+kernel-job-agent.md
